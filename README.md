@@ -42,7 +42,7 @@ visualize data.
 
 ### Step 2: Configure
 
-Created a file called `config.json` in your working directory,
+Create a file called `config.json` in your working directory,
 following [config.sample.json](config.sample.json). The required
 `spreadsheet_id` parameter is the value between the "/d/" and the
 "/edit" in the URL of your spreadsheet. For example, consider the
