@@ -72,8 +72,7 @@ pip and then run them together, piping the output of `tap-fixerio` to
 
 
 ```bash
-› pip install target-gsheet
-› pip install tap-fixerio
+› pip install target-gsheet tap-fixerio
 › tap-fixerio | target-gsheet -c config.json
   INFO Replicating the latest exchange rate data from fixer.io
   INFO Tap exiting normally
