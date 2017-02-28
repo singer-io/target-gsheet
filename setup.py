@@ -3,11 +3,12 @@
 from setuptools import setup
 
 setup(name='target-gsheet',
-      version='0.1.0',
+      version='0.1.1',
       description='Singer.io target for writing data to Google Sheets',
       author='Stitch',
       url='https://singer.io',
       classifiers=['Programming Language :: Python :: 3 :: Only'],
+      py_modules=['target_gsheet'],
       install_requires=[
           'jsonschema',
           'singer-python>=0.1.0',
