@@ -6,6 +6,8 @@ import os
 import sys
 import json
 import logging
+import collections
+import threading
 
 from jsonschema import validate
 import singer
@@ -103,6 +105,15 @@ def append_to_sheet(service, spreadsheet_id, range, values):
         valueInputOption='USER_ENTERED',
         body={'values': [values]}).execute()
     
+def flatten(d, parent_key='', sep='__'):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, str(v) if type(v) is list else v))
+    return dict(items)
 
 def persist_lines(service, spreadsheet, lines):
     state = None
@@ -127,7 +138,8 @@ def persist_lines(service, spreadsheet, lines):
 
             schema = schemas[o['stream']]
             validate(o['record'], schema)
-
+            flattened_record = flatten(o['record'])
+            
             matching_sheet = [s for s in spreadsheet['sheets'] if s['properties']['title'] == o['stream']]
             new_sheet_needed = len(matching_sheet) == 0
             range_name = "{}!A1:ZZZ".format(o['stream'])
@@ -136,7 +148,7 @@ def persist_lines(service, spreadsheet, lines):
                 add_sheet(service, spreadsheet['spreadsheetId'], o['stream'])
                 spreadsheet = get_spreadsheet(service, spreadsheet['spreadsheetId']) # refresh this for future iterations
                 headers_set = False
-                headers = list(o['record'].keys())
+                headers = list(flattened_record.keys())
             else:
                 first_row = get_values(service, spreadsheet['spreadsheetId'], range_name + '1')
                 headers_set = True if 'values' in first_row else False
@@ -147,11 +159,11 @@ def persist_lines(service, spreadsheet, lines):
                                 spreadsheet['spreadsheetId'],
                                 range_name,
                                 headers)
-
+            
             result = append_to_sheet(service,
                                      spreadsheet['spreadsheetId'],
                                      range_name,
-                                     [o['record'][x] for x in headers]) # order by actual headers found in sheet
+                                     [flattened_record.get(x, None) for x in headers]) # order by actual headers found in sheet
 
             state = None
         elif t == 'STATE':
@@ -172,9 +184,36 @@ def persist_lines(service, spreadsheet, lines):
     return state
 
 
+def collect():
+    try:
+        version = pkg_resources.get_distribution('target-gsheet').version
+        conn = http.client.HTTPSConnection('collector.stitchdata.com', timeout=10)
+        conn.connect()
+        params = {
+            'e': 'se',
+            'aid': 'singer',
+            'se_ca': 'lifecycle',
+            'se_ac': 'open',
+            'se_la': 'target-gsheet',
+            'se_pr': 'version',
+            'se_va': version,
+        }
+        conn.request('GET', '/i?' + urllib.parse.urlencode(params))
+        response = conn.getresponse()
+        conn.close()
+    except:
+        logger.debug('Collection request failed')
+
+        
 def main():
     with open(flags.config) as input:
         config = json.load(input)
+        
+    if not config.get('disable_collection', False):
+        logger.info('Sending version information to stitchdata.com. ' +
+                    'To disable sending anonymous usage data, set ' +
+                    'the config parameter "disable_collection" to true')
+        threading.Thread(target=collect).start()
 
     credentials = get_credentials()
     http = credentials.authorize(httplib2.Http())
