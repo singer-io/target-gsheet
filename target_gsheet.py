@@ -8,6 +8,9 @@ import json
 import logging
 import collections
 import threading
+import http.client
+import urllib
+import pkg_resources
 
 from jsonschema import validate
 import singer
