@@ -128,61 +128,49 @@ def persist_lines(service, spreadsheet, lines):
     
     for line in lines:
         try:
-            o = json.loads(line)
+            msg = singer.parse_message(line)
         except json.decoder.JSONDecodeError:
             logger.error("Unable to parse:\n{}".format(line))
             raise
 
-        if 'type' not in o:
-            raise Exception("Line is missing required key 'type': {}".format(line))
-        t = o['type']
+        if isinstance(msg, singer.RecordMessage):
+            if msg.stream not in schemas:
+                raise Exception("A record for stream {} was encountered before a corresponding schema".format(msg.stream))
 
-        if t == 'RECORD':
-            if 'stream' not in o:
-                raise Exception("Line is missing required key 'stream': {}".format(line))
-            if o['stream'] not in schemas:
-                raise Exception("A record for stream {} was encountered before a corresponding schema".format(o['stream']))
-
-            schema = schemas[o['stream']]
-            validate(o['record'], schema)
-            flattened_record = flatten(o['record'])
+            schema = schemas[msg.stream]
+            validate(msg.record, schema)
+            flattened_record = flatten(msg.record)
             
-            matching_sheet = [s for s in spreadsheet['sheets'] if s['properties']['title'] == o['stream']]
+            matching_sheet = [s for s in spreadsheet['sheets'] if s['properties']['title'] == msg.stream]
             new_sheet_needed = len(matching_sheet) == 0
-            range_name = "{}!A1:ZZZ".format(o['stream'])
+            range_name = "{}!A1:ZZZ".format(msg.stream)
             append = functools.partial(append_to_sheet, service, spreadsheet['spreadsheetId'], range_name)
 
             if new_sheet_needed:
-                add_sheet(service, spreadsheet['spreadsheetId'], o['stream'])
+                add_sheet(service, spreadsheet['spreadsheetId'], msg.stream)
                 spreadsheet = get_spreadsheet(service, spreadsheet['spreadsheetId']) # refresh this for future iterations
-                headers_by_stream[o['stream']] = list(flattened_record.keys())
-                append(headers_by_stream[o['stream']])
+                headers_by_stream[msg.stream] = list(flattened_record.keys())
+                append(headers_by_stream[msg.stream])
 
-            elif o['stream'] not in headers_by_stream:
+            elif msg.stream not in headers_by_stream:
                 first_row = get_values(service, spreadsheet['spreadsheetId'], range_name + '1')
                 if 'values' in first_row:
-                    headers_by_stream[o['stream']] = first_row.get('values', None)[0]
+                    headers_by_stream[msg.stream] = first_row.get('values', None)[0]
                 else:
-                    headers_by_stream[o['stream']] = list(flattened_record.keys())
-                    append(headers_by_stream[o['stream']])
+                    headers_by_stream[msg.stream] = list(flattened_record.keys())
+                    append(headers_by_stream[msg.stream])
 
-            result = append([flattened_record.get(x, None) for x in headers_by_stream[o['stream']]]) # order by actual headers found in sheet
+            result = append([flattened_record.get(x, None) for x in headers_by_stream[msg.stream]]) # order by actual headers found in sheet
 
             state = None
-        elif t == 'STATE':
-            logger.debug('Setting state to {}'.format(o['value']))
-            state = o['value']
-        elif t == 'SCHEMA':
-            if 'stream' not in o:
-                raise Exception("Line is missing required key 'stream': {}".format(line))
-            stream = o['stream']
-            schemas[stream] = o['schema']
-            if 'key_properties' not in o:
-                raise Exception("key_properties field is required")
-            key_properties[stream] = o['key_properties']
+        elif isinstance(msg, singer.StateMessage):
+            logger.debug('Setting state to {}'.format(msg.value))
+            state = msg.value
+        elif isinstance(msg, singer.SchemaMessage):
+            schemas[msg.stream] = msg.schema
+            key_properties[msg.stream] = msg.key_properties
         else:
-            raise Exception("Unknown message type {} in message {}"
-                            .format(o['type'], o))
+            raise Exception("Unrecognized message {}".format(msg))
 
     return state
 
