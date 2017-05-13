@@ -118,10 +118,15 @@ def flatten(d, parent_key='', sep='__'):
             items.append((new_key, str(v) if type(v) is list else v))
     return dict(items)
 
+def set_headers(service, spreadsheet):
+
 def persist_lines(service, spreadsheet, lines):
     state = None
     schemas = {}
     key_properties = {}
+
+    headers_by_stream = {}
+    
     for line in lines:
         try:
             o = json.loads(line)
@@ -146,27 +151,23 @@ def persist_lines(service, spreadsheet, lines):
             matching_sheet = [s for s in spreadsheet['sheets'] if s['properties']['title'] == o['stream']]
             new_sheet_needed = len(matching_sheet) == 0
             range_name = "{}!A1:ZZZ".format(o['stream'])
-            
+            append = functools.partial(append_to_sheet, service, spreadsheet['spreadsheetId'], range_name)
+
             if new_sheet_needed:
                 add_sheet(service, spreadsheet['spreadsheetId'], o['stream'])
                 spreadsheet = get_spreadsheet(service, spreadsheet['spreadsheetId']) # refresh this for future iterations
-                headers_set = False
-                headers = list(flattened_record.keys())
-            else:
-                first_row = get_values(service, spreadsheet['spreadsheetId'], range_name + '1')
-                headers_set = True if 'values' in first_row else False
-                headers = first_row.get('values', None)[0]
+                headers_by_stream[o['stream']] = list(flattened_record.keys())
+                append(headers_by_stream[o['stream']])
 
-            if not headers_set:
-                append_to_sheet(service,
-                                spreadsheet['spreadsheetId'],
-                                range_name,
-                                headers)
-            
-            result = append_to_sheet(service,
-                                     spreadsheet['spreadsheetId'],
-                                     range_name,
-                                     [flattened_record.get(x, None) for x in headers]) # order by actual headers found in sheet
+            elif o['stream'] not in headers_by_stream:
+                first_row = get_values(service, spreadsheet['spreadsheetId'], range_name + '1')
+                if 'values' in first_row:
+                    headers_by_stream[o['stream']] = first_row.get('values', None)[0]
+                else:
+                    headers_by_stream[o['stream']] = list(flattened_record.keys())
+                    append(headers_by_stream[o['stream']])
+
+            result = append([flattened_record.get(x, None) for x in headers_by_stream[o['stream']]]) # order by actual headers found in sheet
 
             state = None
         elif t == 'STATE':
