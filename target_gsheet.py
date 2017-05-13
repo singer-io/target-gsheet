@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import functools
 import io
 import os
 import sys
@@ -117,8 +118,6 @@ def flatten(d, parent_key='', sep='__'):
         else:
             items.append((new_key, str(v) if type(v) is list else v))
     return dict(items)
-
-def set_headers(service, spreadsheet):
 
 def persist_lines(service, spreadsheet, lines):
     state = None
