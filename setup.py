@@ -11,7 +11,7 @@ setup(name='target-gsheet',
       py_modules=['target_gsheet'],
       install_requires=[
           'jsonschema==2.6.0',
-          'singer-python==0.1.0',
+          'singer-python==1.5.0',
           'google-api-python-client==1.6.2'
       ],
       entry_points='''
