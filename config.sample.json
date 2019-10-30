@@ -1,3 +1,4 @@
 {
-    "spreadsheet_id": "abcdefgh-hijklmn-opqrstuvwxyz123456789ABCDEF"
+    "spreadsheet_id": "abcdefgh-hijklmn-opqrstuvwxyz123456789ABCDEF",
+    "batch_size": 10
 }
