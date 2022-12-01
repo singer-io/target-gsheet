@@ -8,6 +8,10 @@ import sys
 import json
 import logging
 import collections
+if sys.version_info >= (3, 10):
+    from collections.abc import MutableMapping
+else:
+    from collections import MutableMapping
 import threading
 import http.client
 import urllib
@@ -74,7 +78,7 @@ def emit_state(state):
         logger.debug('Emitting state {}'.format(line))
         sys.stdout.write("{}\n".format(line))
         sys.stdout.flush()
-        
+
 def get_spreadsheet(service, spreadsheet_id):
     return service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
 
@@ -108,12 +112,12 @@ def append_to_sheet(service, spreadsheet_id, range, values):
         range=range,
         valueInputOption='USER_ENTERED',
         body={'values': [values]}).execute()
-    
+
 def flatten(d, parent_key='', sep='__'):
     items = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
-        if isinstance(v, collections.MutableMapping):
+        if isinstance(v, MutableMapping):
             items.extend(flatten(v, new_key, sep=sep).items())
         else:
             items.append((new_key, str(v) if type(v) is list else v))
@@ -125,7 +129,7 @@ def persist_lines(service, spreadsheet, lines):
     key_properties = {}
 
     headers_by_stream = {}
-    
+
     for line in lines:
         try:
             msg = singer.parse_message(line)
@@ -140,7 +144,7 @@ def persist_lines(service, spreadsheet, lines):
             schema = schemas[msg.stream]
             validate(msg.record, schema)
             flattened_record = flatten(msg.record)
-            
+
             matching_sheet = [s for s in spreadsheet['sheets'] if s['properties']['title'] == msg.stream]
             new_sheet_needed = len(matching_sheet) == 0
             range_name = "{}!A1:ZZZ".format(msg.stream)
@@ -193,11 +197,11 @@ def collect():
     except:
         logger.debug('Collection request failed')
 
-        
+
 def main():
     with open(flags.config) as input:
         config = json.load(input)
-        
+
     if not config.get('disable_collection', False):
         logger.info('Sending version information to stitchdata.com. ' +
                     'To disable sending anonymous usage data, set ' +
