@@ -37,6 +37,7 @@ logger = singer.get_logger()
 SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Singer Sheets Target'
+DEFAULT_BATCH_SIZE = 10
 
 
 def get_credentials():
@@ -103,11 +104,13 @@ def add_sheet(service, spreadsheet_id, title):
 
 
 def append_to_sheet(service, spreadsheet_id, range, values):
+    sheet_name = range.split('!')[0]
+    logger.info('Writing {} rows to {}'.format(len(values), sheet_name))
     return service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
         range=range,
         valueInputOption='USER_ENTERED',
-        body={'values': [values]}).execute()
+        body={'values': values}).execute()
     
 def flatten(d, parent_key='', sep='__'):
     items = []
@@ -119,12 +122,21 @@ def flatten(d, parent_key='', sep='__'):
             items.append((new_key, str(v) if type(v) is list else v))
     return dict(items)
 
-def persist_lines(service, spreadsheet, lines):
+def write_batch(service, spreadsheet_id, headers, batch):
+    values = []
+    for msg in batch:
+        flattened_record = flatten(msg.record)
+        values.append([flattened_record.get(x, None) for x in headers])
+    append_to_sheet(service, spreadsheet_id, "{}!A1:ZZZ".format(batch[0].stream), values)
+
+def persist_lines(service, spreadsheet, lines, batch_size):
     state = None
     schemas = {}
     key_properties = {}
 
     headers_by_stream = {}
+
+    batch = []
     
     for line in lines:
         try:
@@ -136,6 +148,11 @@ def persist_lines(service, spreadsheet, lines):
         if isinstance(msg, singer.RecordMessage):
             if msg.stream not in schemas:
                 raise Exception("A record for stream {} was encountered before a corresponding schema".format(msg.stream))
+
+            # If this is a new stream, write the existing batch to Google Sheets
+            if batch and msg.stream != batch[0].stream:
+                write_batch(service, spreadsheet['spreadsheetId'], headers_by_stream[batch[0].stream], batch)
+                batch = []
 
             schema = schemas[msg.stream]
             validate(msg.record, schema)
@@ -150,7 +167,7 @@ def persist_lines(service, spreadsheet, lines):
                 add_sheet(service, spreadsheet['spreadsheetId'], msg.stream)
                 spreadsheet = get_spreadsheet(service, spreadsheet['spreadsheetId']) # refresh this for future iterations
                 headers_by_stream[msg.stream] = list(flattened_record.keys())
-                append(headers_by_stream[msg.stream])
+                append([headers_by_stream[msg.stream]])
 
             elif msg.stream not in headers_by_stream:
                 first_row = get_values(service, spreadsheet['spreadsheetId'], range_name + '1')
@@ -158,9 +175,12 @@ def persist_lines(service, spreadsheet, lines):
                     headers_by_stream[msg.stream] = first_row.get('values', None)[0]
                 else:
                     headers_by_stream[msg.stream] = list(flattened_record.keys())
-                    append(headers_by_stream[msg.stream])
+                    append([headers_by_stream[msg.stream]])
 
-            result = append([flattened_record.get(x, None) for x in headers_by_stream[msg.stream]]) # order by actual headers found in sheet
+            batch.append(msg)
+            if len(batch) >= batch_size:
+                write_batch(service, spreadsheet['spreadsheetId'], headers_by_stream[batch[0].stream], batch)
+                batch = []
 
             state = None
         elif isinstance(msg, singer.StateMessage):
@@ -171,6 +191,10 @@ def persist_lines(service, spreadsheet, lines):
             key_properties[msg.stream] = msg.key_properties
         else:
             raise Exception("Unrecognized message {}".format(msg))
+
+    if batch:
+        write_batch(service, spreadsheet['spreadsheetId'], headers_by_stream[batch[0].stream], batch)
+        batch = []
 
     return state
 
@@ -204,6 +228,7 @@ def main():
                     'the config parameter "disable_collection" to true')
         threading.Thread(target=collect).start()
 
+    batch_size = config.get('batch_size', DEFAULT_BATCH_SIZE)
     credentials = get_credentials()
     http = credentials.authorize(httplib2.Http())
     discoveryUrl = ('https://sheets.googleapis.com/$discovery/rest?'
@@ -215,7 +240,7 @@ def main():
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
     state = None
-    state = persist_lines(service, spreadsheet, input)
+    state = persist_lines(service, spreadsheet, input, batch_size)
     emit_state(state)
     logger.debug("Exiting normally")
 
